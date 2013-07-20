@@ -36,8 +36,6 @@
             this.label2 = new System.Windows.Forms.Label();
             this.label1 = new System.Windows.Forms.Label();
             this.groupBox3 = new System.Windows.Forms.GroupBox();
-            this.LabelLengthRS = new System.Windows.Forms.Label();
-            this.LabelLengthLS = new System.Windows.Forms.Label();
             this.PictureSimulation = new System.Windows.Forms.PictureBox();
             this.groupBox1.SuspendLayout();
             ((System.ComponentModel.ISupportInitialize)(this.PictureInput)).BeginInit();
@@ -113,8 +111,6 @@
             // 
             // groupBox3
             // 
-            this.groupBox3.Controls.Add(this.LabelLengthRS);
-            this.groupBox3.Controls.Add(this.LabelLengthLS);
             this.groupBox3.Controls.Add(this.PictureSimulation);
             this.groupBox3.Location = new System.Drawing.Point(480, 12);
             this.groupBox3.Name = "groupBox3";
@@ -122,24 +118,6 @@
             this.groupBox3.TabIndex = 2;
             this.groupBox3.TabStop = false;
             this.groupBox3.Text = "Simulation";
-            // 
-            // LabelLengthRS
-            // 
-            this.LabelLengthRS.AutoSize = true;
-            this.LabelLengthRS.Location = new System.Drawing.Point(7, 324);
-            this.LabelLengthRS.Name = "LabelLengthRS";
-            this.LabelLengthRS.Size = new System.Drawing.Size(61, 13);
-            this.LabelLengthRS.TabIndex = 2;
-            this.LabelLengthRS.Text = "RS Length:";
-            // 
-            // LabelLengthLS
-            // 
-            this.LabelLengthLS.AutoSize = true;
-            this.LabelLengthLS.Location = new System.Drawing.Point(7, 311);
-            this.LabelLengthLS.Name = "LabelLengthLS";
-            this.LabelLengthLS.Size = new System.Drawing.Size(59, 13);
-            this.LabelLengthLS.TabIndex = 1;
-            this.LabelLengthLS.Text = "LS Length:";
             // 
             // PictureSimulation
             // 
@@ -167,7 +145,6 @@
             this.groupBox2.ResumeLayout(false);
             this.groupBox2.PerformLayout();
             this.groupBox3.ResumeLayout(false);
-            this.groupBox3.PerformLayout();
             ((System.ComponentModel.ISupportInitialize)(this.PictureSimulation)).EndInit();
             this.ResumeLayout(false);
 
@@ -184,8 +161,6 @@
         private System.Windows.Forms.Label label1;
         private System.Windows.Forms.GroupBox groupBox3;
         private System.Windows.Forms.PictureBox PictureSimulation;
-        private System.Windows.Forms.Label LabelLengthRS;
-        private System.Windows.Forms.Label LabelLengthLS;
     }
 }
 

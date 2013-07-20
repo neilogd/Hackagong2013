@@ -10,12 +10,12 @@ namespace WhiteboardDrawer.Common
     {
         #region Events
 
-        public class StepperReadyArgs: EventArgs
+        public class DrawerReadyArgs: EventArgs
         {
-            public int StepperIndex;
+            
         }
-        public delegate void StepperReady(object o, StepperReadyArgs e);
-        public event StepperReady OnStepperReady = null;
+        public delegate void DrawerReady(object o, DrawerReadyArgs e);
+        public event DrawerReady OnDrawerReady = null;
 
         public class LineFeedLengthChangedArgs : EventArgs
         {
@@ -44,7 +44,22 @@ namespace WhiteboardDrawer.Common
         /// Steppers to draw with.
         /// </summary>
         public Phidgets.Stepper[] _steppers = null;
-      
+
+        /// <summary>
+        /// Acceleration multiplier.
+        /// </summary>
+        public double _accelerationMultiplier = 1.0 / 32.0;
+
+        /// <summary>
+        /// Velocity multiplier.
+        /// </summary>
+        public double _velocityMultiplier = 1.0 / 1.0;
+
+        /// <summary>
+        /// Current line feed length in millimetres.
+        /// </summary>
+        private double[] _lineFeedLength = null;
+
         /// <summary>
         /// Length to stepper position conversion.
         /// </summary>
@@ -66,6 +81,13 @@ namespace WhiteboardDrawer.Common
         /// </summary>
         public Vector _cradleDimensions;
 
+
+        /// <summary>
+        /// Serial numbers.
+        /// </summary>
+        private int[] _stepperSerialNos;
+
+
         #endregion 
 
         public Drawer(Vector[] lineFeedPositions, Vector[] cradleMountPoints, Vector cradleDimensions, int[] stepperSerialNos)
@@ -74,11 +96,13 @@ namespace WhiteboardDrawer.Common
             _cradleMountPoints = cradleMountPoints;
             _cradleDimensions = cradleDimensions;
 
+            _lineFeedLength = new double[_lineFeedPoints.Length];
+
             _steppers = new Phidgets.Stepper[_lineFeedPoints.Length];
+            _stepperSerialNos = stepperSerialNos;
             for (int idx = 0; idx < _steppers.Length; ++idx)
             {
                 var stepper = new Phidgets.Stepper();
-                var serialNo = stepperSerialNos[idx];
 
                 stepper.Attach += new Phidgets.Events.AttachEventHandler(Stepper_Attach);
                 stepper.Detach += new Phidgets.Events.DetachEventHandler(Stepper_Detach);
@@ -88,12 +112,36 @@ namespace WhiteboardDrawer.Common
                 stepper.PositionChange += new Phidgets.Events.StepperPositionChangeEventHandler(Stepper_PositionChange);
                 stepper.VelocityChange += new Phidgets.Events.VelocityChangeEventHandler(Stepper_VelocityChange);
                 stepper.InputChange += new Phidgets.Events.InputChangeEventHandler(Stepper_InputChange);
-                
-                stepper.open(serialNo);
-
-
+               
                 _steppers[idx] = stepper;
+
+                // Reset line feed length.
+                _lineFeedLength[idx] = 0.0;
             }
+        }
+
+        public void Open()
+        {
+            for (int idx = 0; idx < _steppers.Length; ++idx)
+            {
+                var stepper = _steppers[idx];
+                stepper.open(_stepperSerialNos[idx]);
+            }
+        }
+
+        public bool IsReady()
+        {
+            for (int idx = 0; idx < _steppers.Length; ++idx)
+            {
+                var stepper = _steppers[idx];
+
+                if (stepper.Attached == false)
+                {
+                    return false;
+                }
+            }
+
+            return true;
         }
 
         /// <summary>
@@ -156,17 +204,34 @@ namespace WhiteboardDrawer.Common
         /// <param name="targetPosition"></param>
         public void MoveCradle(Vector targetPosition)
         {
+            // Early out avoid crash.
+            if (IsReady() == false)
+            {
+                return;
+            }
             // Get line lengths for cradle.
-            double[] lengths = new double[_lineFeedPoints.Length];
-            GetLineLengthsForCradle(targetPosition, out lengths);
+            double[] targetLengths = new double[_lineFeedPoints.Length];
+            GetLineLengthsForCradle(targetPosition, out targetLengths);
+
+            // Calculate the length each needs to travel (velocity calculation)
+            double maxLengthDifference = 0.0;
+            double[] lengthDifferences = new double[_lineFeedLength.Length];
+            for(int idx = 0; idx < _lineFeedLength.Length; ++idx)
+            {
+                lengthDifferences[idx] = System.Math.Abs(targetLengths[idx] - _lineFeedLength[idx]);
+                maxLengthDifference = System.Math.Max(lengthDifferences[idx], maxLengthDifference);
+            }
 
             // Convert to positions for the stepper, and pass to steppers.
             for (int idx = 0; idx < _lineFeedPoints.Length; ++idx)
             {
                 long currentStepperPosition = _steppers[idx].steppers[0].CurrentPosition;
-                long targetStepperPosition = _targetLengthToStepperPosition(lengths[idx]);
+                long targetStepperPosition = _targetLengthToStepperPosition(targetLengths[idx]);
+                double motionFraction = lengthDifferences[idx] / maxLengthDifference;
                 if (currentStepperPosition != targetStepperPosition)
                 {
+                    _steppers[idx].steppers[0].Acceleration = _steppers[idx].steppers[0].AccelerationMax * _accelerationMultiplier;
+                    _steppers[idx].steppers[0].VelocityLimit = _steppers[idx].steppers[0].VelocityMax * motionFraction * _velocityMultiplier;
                     _steppers[idx].steppers[0].TargetPosition = targetStepperPosition;
                     _steppers[idx].steppers[0].Engaged = true;
                 }
@@ -195,19 +260,22 @@ namespace WhiteboardDrawer.Common
             Phidgets.Stepper attachedStepper = (Phidgets.Stepper)sender;
 
             // Set 1/8th of max for the mean time. Will tweak later on.
-            attachedStepper.steppers[0].Acceleration = attachedStepper.steppers[0].AccelerationMax / 8;
-            attachedStepper.steppers[0].VelocityLimit = attachedStepper.steppers[0].VelocityMax / 8;
-            attachedStepper.steppers[0].CurrentLimit = attachedStepper.steppers[0].CurrentMax / 8.0;
+            attachedStepper.steppers[0].Acceleration = attachedStepper.steppers[0].AccelerationMax / 32.0;
+            attachedStepper.steppers[0].VelocityLimit = attachedStepper.steppers[0].VelocityMax / 4.0;
+            attachedStepper.steppers[0].CurrentLimit = attachedStepper.steppers[0].CurrentMax / 2.0;
             attachedStepper.steppers[0].CurrentPosition = 0;
             attachedStepper.steppers[0].TargetPosition = 0;
+            attachedStepper.steppers[0].Engaged = false;
 
             // Event callback.
-            if (OnStepperReady != null)
+            if (OnDrawerReady != null)
             {
-                OnStepperReady(this, new StepperReadyArgs
+                if (IsReady())
                 {
-                    StepperIndex = GetStepperIndex(attachedStepper)
-                });
+                    OnDrawerReady(this, new DrawerReadyArgs
+                    {
+                    });
+                }
             }
         }
 
@@ -252,19 +320,23 @@ namespace WhiteboardDrawer.Common
         {
             Phidgets.Stepper attachedStepper = (Phidgets.Stepper)sender;
 
+            /*
             if (attachedStepper.steppers[0].CurrentPosition == attachedStepper.steppers[0].TargetPosition)
             {
                 attachedStepper.steppers[0].Engaged = false;
             }
+             **/
 
+            var lineIndex = GetStepperIndex(attachedStepper);
+            _lineFeedLength[lineIndex] = _stepperPositionToTargetLength(attachedStepper.steppers[0].CurrentPosition);
 
             // Event callback.
             if (OnLineFeedLengthChanged != null)
             {
                 OnLineFeedLengthChanged(this, new LineFeedLengthChangedArgs
                 {
-                    LineIndex = GetStepperIndex(attachedStepper),        // stepper index is same as line index.
-                    Length = _stepperPositionToTargetLength(attachedStepper.steppers[0].CurrentPosition)
+                    LineIndex = lineIndex,        // stepper index is same as line index.
+                    Length = _lineFeedLength[lineIndex]
                 });
             }
 
