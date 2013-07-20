@@ -48,12 +48,12 @@ namespace WhiteboardDrawer.Common
         /// <summary>
         /// Acceleration multiplier.
         /// </summary>
-        public double _accelerationMultiplier = 1.0 / 32.0;
+        public double _accelerationMultiplier = 1.0 / 256.0;
 
         /// <summary>
         /// Velocity multiplier.
         /// </summary>
-        public double _velocityMultiplier = 1.0 / 1.0;
+        public double _velocityMultiplier = 1.0 / 64.0;
 
         /// <summary>
         /// Current line feed length in millimetres.
@@ -87,6 +87,21 @@ namespace WhiteboardDrawer.Common
         /// </summary>
         private int[] _stepperSerialNos;
 
+
+        /// <summary>
+        /// Target position.
+        /// </summary>
+        private Vector _targetPosition = new Vector(0.0, 0.0);
+
+        /// <summary>
+        /// Estimated position.
+        /// </summary>
+        private Vector _estimatedPosition = new Vector(0.0, 0.0);
+
+        /// <summary>
+        /// Target waypoint list.
+        /// </summary>
+        private List<Vector> _targetWaypointList = new List<Vector>();
 
         #endregion 
 
@@ -209,6 +224,9 @@ namespace WhiteboardDrawer.Common
             {
                 return;
             }
+
+            _targetPosition = targetPosition;
+
             // Get line lengths for cradle.
             double[] targetLengths = new double[_lineFeedPoints.Length];
             GetLineLengthsForCradle(targetPosition, out targetLengths);
@@ -230,13 +248,52 @@ namespace WhiteboardDrawer.Common
                 double motionFraction = lengthDifferences[idx] / maxLengthDifference;
                 if (currentStepperPosition != targetStepperPosition)
                 {
-                    _steppers[idx].steppers[0].Acceleration = _steppers[idx].steppers[0].AccelerationMax * _accelerationMultiplier;
+                    _steppers[idx].steppers[0].Acceleration = _steppers[idx].steppers[0].AccelerationMin;
                     _steppers[idx].steppers[0].VelocityLimit = _steppers[idx].steppers[0].VelocityMax * motionFraction * _velocityMultiplier;
                     _steppers[idx].steppers[0].TargetPosition = targetStepperPosition;
                     _steppers[idx].steppers[0].Engaged = true;
                 }
             }
         }
+
+        #region Utility
+
+        /// <summary>
+        /// Get estimated cradle position.
+        /// </summary>
+        /// <returns></returns>
+        public Vector GetEstimatedCradlePosition()
+        {
+            return _estimatedPosition;
+        }
+
+        /// <summary>
+        /// Estimate the cradle position.
+        /// </summary>
+        /// <param name="iterations"></param>
+        /// <returns></returns>
+        public Vector EstimatedCradlePosition(int iterations, double stepSize, Vector estimatedPosition)
+        {
+            for (int iterationIdx = 0; iterationIdx < iterations; ++iterationIdx)
+            {
+                // For each mount point, move estimated position slightly in the right direction.
+                for (int mountPointIdx = 0; mountPointIdx < _cradleMountPoints.Length; ++mountPointIdx)
+                {
+                    var mointPointRelative = _cradleMountPoints[mountPointIdx];
+                    var mountPointPosition = estimatedPosition + mointPointRelative;
+                    var mountPointDifference = (_lineFeedPoints[mountPointIdx] - mountPointPosition);
+                    var mountPointDistance = mountPointDifference.Length;
+                    var lineLengthDifference = mountPointDistance - _lineFeedLength[mountPointIdx];
+
+                    mountPointDifference.Normalize();
+                    estimatedPosition += mountPointDifference * stepSize * lineLengthDifference;
+                }
+            }
+
+            return estimatedPosition;
+        }
+
+        #endregion
 
         #region Stepper Events
 
@@ -253,16 +310,15 @@ namespace WhiteboardDrawer.Common
             throw new Exception("Unable to find stepper.");
         }
 
-
         //Stepper attach event handler...populate the available fields and controls
         void Stepper_Attach(object sender, Phidgets.Events.AttachEventArgs e)
         {
             Phidgets.Stepper attachedStepper = (Phidgets.Stepper)sender;
 
             // Set 1/8th of max for the mean time. Will tweak later on.
-            attachedStepper.steppers[0].Acceleration = attachedStepper.steppers[0].AccelerationMax / 32.0;
-            attachedStepper.steppers[0].VelocityLimit = attachedStepper.steppers[0].VelocityMax / 4.0;
-            attachedStepper.steppers[0].CurrentLimit = attachedStepper.steppers[0].CurrentMax / 2.0;
+            attachedStepper.steppers[0].Acceleration = attachedStepper.steppers[0].AccelerationMax;
+            attachedStepper.steppers[0].VelocityLimit = attachedStepper.steppers[0].VelocityMax;
+            attachedStepper.steppers[0].CurrentLimit = attachedStepper.steppers[0].CurrentMax / 1.0;
             attachedStepper.steppers[0].CurrentPosition = 0;
             attachedStepper.steppers[0].TargetPosition = 0;
             attachedStepper.steppers[0].Engaged = false;
@@ -272,6 +328,19 @@ namespace WhiteboardDrawer.Common
             {
                 if (IsReady())
                 {
+                    // Centre plz.
+                    double[] targetLengths = new double[_lineFeedPoints.Length];
+                    GetLineLengthsForCradle(_targetPosition, out targetLengths);
+
+                    for (int idx = 0; idx < _lineFeedPoints.Length; ++idx)
+                    {
+                        var stepper = _steppers[idx];
+
+                        stepper.steppers[0].CurrentPosition = _targetLengthToStepperPosition(targetLengths[idx]);
+                        stepper.steppers[0].TargetPosition = stepper.steppers[0].CurrentPosition;
+                    }
+
+                    // Call drawer ready event.
                     OnDrawerReady(this, new DrawerReadyArgs
                     {
                     });
@@ -340,6 +409,22 @@ namespace WhiteboardDrawer.Common
                 });
             }
 
+            // Estimate cradle position.
+            _estimatedPosition = EstimatedCradlePosition(32, 0.2f, _estimatedPosition);
+
+            //
+            if (_targetWaypointList.Count >= 2)
+            {
+                var waypointDiff = _targetWaypointList[1] - _targetWaypointList[0];
+                var waypointDist = waypointDiff.Length;
+                var estimatedDiff = _targetWaypointList[1] - _estimatedPosition;
+                var estimatedDist = estimatedDiff.Length;
+
+                if (estimatedDist < (waypointDist * 0.5f))
+                {
+
+                }
+            }
         }
 
         void Stepper_VelocityChange(object sender, Phidgets.Events.VelocityChangeEventArgs e)
