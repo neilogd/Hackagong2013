@@ -14,10 +14,16 @@ namespace WhiteboardDrawer.Common
         {
             public int StepperIndex;
         }
-
         public delegate void StepperReady(object o, StepperReadyArgs e);
+        public event StepperReady OnStepperReady = null;
 
-        public event StepperReady OnStepperReady;
+        public class LineFeedLengthChangedArgs : EventArgs
+        {
+            public int LineIndex;
+            public double Length;
+        }
+        public delegate void LineFeedLengthChanged(object o, LineFeedLengthChangedArgs e);
+        public event LineFeedLengthChanged OnLineFeedLengthChanged = null;
 
         #endregion
 
@@ -38,7 +44,23 @@ namespace WhiteboardDrawer.Common
         /// Steppers to draw with.
         /// </summary>
         public Phidgets.Stepper[] _steppers = null;
-       
+      
+        /// <summary>
+        /// Length to stepper position conversion.
+        /// </summary>
+        /// <param name="?"></param>
+        /// <returns></returns>
+        public delegate long TargetLengthToStepperPosition(double length);
+        public TargetLengthToStepperPosition _targetLengthToStepperPosition = null;
+
+        /// <summary>
+        /// Stepper position to length conversion.
+        /// </summary>
+        /// <param name="length"></param>
+        /// <returns></returns>
+        public delegate double StepperPositionToTargetLength(long stepperPosition);
+        public StepperPositionToTargetLength _stepperPositionToTargetLength = null;
+
         /// <summary>
         /// Cradle dimensions.
         /// </summary>
@@ -128,32 +150,65 @@ namespace WhiteboardDrawer.Common
             GetLineLengths(_lineFeedPoints, targetPositions, out outLengths);
         }
 
+        /// <summary>
+        /// Move the cradle.
+        /// </summary>
+        /// <param name="targetPosition"></param>
+        public void MoveCradle(Vector targetPosition)
+        {
+            // Get line lengths for cradle.
+            double[] lengths = new double[_lineFeedPoints.Length];
+            GetLineLengthsForCradle(targetPosition, out lengths);
+
+            // Convert to positions for the stepper, and pass to steppers.
+            for (int idx = 0; idx < _lineFeedPoints.Length; ++idx)
+            {
+                long currentStepperPosition = _steppers[idx].steppers[0].CurrentPosition;
+                long targetStepperPosition = _targetLengthToStepperPosition(lengths[idx]);
+                if (currentStepperPosition != targetStepperPosition)
+                {
+                    _steppers[idx].steppers[0].TargetPosition = targetStepperPosition;
+                    _steppers[idx].steppers[0].Engaged = true;
+                }
+            }
+        }
+
         #region Stepper Events
+
+        int GetStepperIndex(Phidgets.Stepper stepper)
+        {
+            // Find in list.
+            for (int idx = 0; idx < _steppers.Length; ++idx)
+            {
+                if (stepper == _steppers[idx])
+                {
+                    return idx;
+                }
+            }
+            throw new Exception("Unable to find stepper.");
+        }
+
 
         //Stepper attach event handler...populate the available fields and controls
         void Stepper_Attach(object sender, Phidgets.Events.AttachEventArgs e)
         {
             Phidgets.Stepper attachedStepper = (Phidgets.Stepper)sender;
 
-            attachedStepper.steppers[0].Acceleration = attachedStepper.steppers[0].AccelerationMin;
-            attachedStepper.steppers[0].VelocityLimit = attachedStepper.steppers[0].VelocityMin;
-
-            // Find in list.
-            int stepperIndex = -1;
-            for(int idx = 0; idx < _steppers.Length; ++idx)
-            {
-                if(attachedStepper == _steppers[idx])
-                {
-                    stepperIndex = idx;
-                    break;
-                }
-            }
+            // Set 1/8th of max for the mean time. Will tweak later on.
+            attachedStepper.steppers[0].Acceleration = attachedStepper.steppers[0].AccelerationMax / 8;
+            attachedStepper.steppers[0].VelocityLimit = attachedStepper.steppers[0].VelocityMax / 8;
+            attachedStepper.steppers[0].CurrentLimit = attachedStepper.steppers[0].CurrentMax / 8.0;
+            attachedStepper.steppers[0].CurrentPosition = 0;
+            attachedStepper.steppers[0].TargetPosition = 0;
 
             // Event callback.
-            OnStepperReady(this, new StepperReadyArgs
+            if (OnStepperReady != null)
             {
-                StepperIndex = stepperIndex
-            });
+                OnStepperReady(this, new StepperReadyArgs
+                {
+                    StepperIndex = GetStepperIndex(attachedStepper)
+                });
+            }
         }
 
         //Stepper Detach event handler...Clear all the fields and disable all the controls
@@ -195,15 +250,24 @@ namespace WhiteboardDrawer.Common
 
         void Stepper_PositionChange(object sender, Phidgets.Events.StepperPositionChangeEventArgs e)
         {
-            /*
-            if (e.Index == (int)stepperCmb.SelectedItem)
+            Phidgets.Stepper attachedStepper = (Phidgets.Stepper)sender;
+
+            if (attachedStepper.steppers[0].CurrentPosition == attachedStepper.steppers[0].TargetPosition)
             {
-                positionTxt.Text = e.Position.ToString();
-                stoppedCheckBox.Checked = stepper.steppers[e.Index].Stopped;
-                if (!currentPositionTrk.Focused)
-                    currentPositionTrk.Enabled = stepper.steppers[e.Index].Stopped;
+                attachedStepper.steppers[0].Engaged = false;
             }
-             * */
+
+
+            // Event callback.
+            if (OnLineFeedLengthChanged != null)
+            {
+                OnLineFeedLengthChanged(this, new LineFeedLengthChangedArgs
+                {
+                    LineIndex = GetStepperIndex(attachedStepper),        // stepper index is same as line index.
+                    Length = _stepperPositionToTargetLength(attachedStepper.steppers[0].CurrentPosition)
+                });
+            }
+
         }
 
         void Stepper_VelocityChange(object sender, Phidgets.Events.VelocityChangeEventArgs e)

@@ -148,6 +148,7 @@
             this.PictureSimulation.Size = new System.Drawing.Size(451, 285);
             this.PictureSimulation.TabIndex = 0;
             this.PictureSimulation.TabStop = false;
+            this.PictureSimulation.Click += new System.EventHandler(this.PictureSimulation_Click);
             this.PictureSimulation.MouseClick += new System.Windows.Forms.MouseEventHandler(this.PictureSimulation_MouseClick);
             this.PictureSimulation.MouseMove += new System.Windows.Forms.MouseEventHandler(this.PictureSimulation_MouseMove);
             // 

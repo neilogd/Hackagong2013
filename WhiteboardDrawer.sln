@@ -1,7 +1,7 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Express 2012 for Windows Desktop
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WhiteboardDrawer", "WindowsFormsApplication2\WhiteboardDrawer.csproj", "{32B95886-3AAB-4BE5-85A9-B70D52F5C55B}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "WhiteboardDrawer", "WhiteboardDrawer\WhiteboardDrawer.csproj", "{32B95886-3AAB-4BE5-85A9-B70D52F5C55B}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution

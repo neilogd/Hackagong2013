@@ -16,7 +16,10 @@ namespace WhiteboardDrawer
         private Common.Drawer _drawer = null;
         private int _drawPadding = 16;
         private int _feedSize = 4;
+        private Vector _cradlePosition;
         private Vector _boardDimensions = new Vector(1000.0, 750.0);
+
+        private double[] _estimatedLineLengths = null;
 
         public MainForm()
         {
@@ -43,9 +46,21 @@ namespace WhiteboardDrawer
                 304740
             };
 
+            _estimatedLineLengths = new double[2];
+
             // Create drawer.
             _drawer = new Common.Drawer(lineFeeds, cradleMountPoints, cradleDimensions, serialNos);
 
+            _drawer.OnLineFeedLengthChanged += OnLineFeedLengthChangedArgs;
+        }
+
+        delegate void DrawSimulationDelegate();
+
+        private void OnLineFeedLengthChangedArgs(object o, Common.Drawer.LineFeedLengthChangedArgs e)
+        {
+            _estimatedLineLengths[e.LineIndex] = e.Length;
+
+            Invoke(new DrawSimulationDelegate(DrawSimulation));
         }
 
         /// <summary>
@@ -113,8 +128,7 @@ namespace WhiteboardDrawer
         /// <summary>
         /// Draw simulation.
         /// </summary>
-        /// <param name="cradlePosition"></param>
-        private void DrawSimulation(Vector cradlePosition)
+        private void DrawSimulation()
         {
             // Create image for picture simulation.
             if (PictureSimulation.Image == null)
@@ -148,25 +162,30 @@ namespace WhiteboardDrawer
                 g.DrawLine(Pens.LightGray, PhysicalToPixelPoint(new Vector(-_boardDimensions.X * 0.5, 0.0)), PhysicalToPixelPoint(new Vector(_boardDimensions.X * 0.5, 0.0)));
                 g.DrawLine(Pens.LightGray, PhysicalToPixelPoint(new Vector(0.0, -_boardDimensions.Y * 0.5)), PhysicalToPixelPoint(new Vector(0.0, _boardDimensions.Y * 0.5)));
 
-                // Draw the line feed points, cradle mount points, and lines between.
+                // Draw the line feed points, cradle mount points, lines between, and estimated length arcs.
                 var feedSize = new System.Drawing.Size(_feedSize, _feedSize);
                 var physicalSize = PixelSizeToPhysical(feedSize);
                 for (int idx = 0; idx < _drawer._lineFeedPoints.Length; ++idx)
                 {
                     var lineFeedPoint = PhysicalToPixelPoint(_drawer._lineFeedPoints[idx] - (physicalSize * 0.5));
-                    var cradleMountPoint = PhysicalToPixelPoint(_drawer._cradleMountPoints[idx] + cradlePosition - (physicalSize * 0.5));
+                    var cradleMountPoint = PhysicalToPixelPoint(_drawer._cradleMountPoints[idx] + _cradlePosition - (physicalSize * 0.5));
 
                     g.DrawEllipse(Pens.Red, new System.Drawing.Rectangle(lineFeedPoint, feedSize));
                     g.DrawEllipse(Pens.Green, new System.Drawing.Rectangle(cradleMountPoint, feedSize));
 
                     var lineFeedCentrePoint = PhysicalToPixelPoint(_drawer._lineFeedPoints[idx]);
-                    var cradleMountCentrePoint = PhysicalToPixelPoint(_drawer._cradleMountPoints[idx] + cradlePosition);
+                    var cradleMountCentrePoint = PhysicalToPixelPoint(_drawer._cradleMountPoints[idx] + _cradlePosition);
 
                     g.DrawLine(Pens.Purple, lineFeedCentrePoint, cradleMountCentrePoint);
+
+                    var lineLength = new Vector(_estimatedLineLengths[idx], _estimatedLineLengths[idx]) * 2.0;
+                    var lineFeedLengthPoint = PhysicalToPixelPoint(_drawer._lineFeedPoints[idx] - (lineLength * 0.5));
+                    var lineLengthSize = PhysicalToPixelSize(lineLength);
+                    g.DrawEllipse(Pens.Blue, new System.Drawing.Rectangle(lineFeedLengthPoint, lineLengthSize));
                 }
 
                 // Draw cradle.
-                var cradlePoint = PhysicalToPixelPoint(cradlePosition - (_drawer._cradleDimensions * 0.5));
+                var cradlePoint = PhysicalToPixelPoint(_cradlePosition - (_drawer._cradleDimensions * 0.5));
                 var cradleSize = PhysicalToPixelSize(_drawer._cradleDimensions);
                 g.DrawRectangle(Pens.Blue, new System.Drawing.Rectangle(cradlePoint, cradleSize));
             }
@@ -176,12 +195,27 @@ namespace WhiteboardDrawer
 
         private void PictureSimulation_MouseClick(object sender, MouseEventArgs e)
         {
-            DrawSimulation(PixelPointToPhysical(new System.Drawing.Point(e.X, e.Y)));
+            double multiplier = 32.0f;
+
+            _drawer._targetLengthToStepperPosition = (double length) =>
+            {
+                return (long)(length * multiplier);
+            };
+
+            _drawer._stepperPositionToTargetLength = (long stepperPosition) =>
+            {
+                return (double)stepperPosition / multiplier;
+            };
+
+            _cradlePosition = PixelPointToPhysical(new System.Drawing.Point(e.X, e.Y));
+            _drawer.MoveCradle(_cradlePosition);
+            DrawSimulation();
         }
 
         private void PictureSimulation_MouseMove(object sender, MouseEventArgs e)
         {
-            DrawSimulation(PixelPointToPhysical(new System.Drawing.Point(e.X, e.Y)));
+            _cradlePosition = PixelPointToPhysical(new System.Drawing.Point(e.X, e.Y));
+            DrawSimulation();
         }
 
         private void PictureInput_DoubleClick(object sender, EventArgs e)
@@ -207,6 +241,11 @@ namespace WhiteboardDrawer
         }
 
         private void PictureInput_Click(object sender, EventArgs e)
+        {
+
+        }
+
+        private void PictureSimulation_Click(object sender, EventArgs e)
         {
 
         }
