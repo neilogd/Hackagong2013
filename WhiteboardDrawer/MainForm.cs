@@ -24,6 +24,8 @@ namespace WhiteboardDrawer
 
         private double[] _estimatedLineLengths = null;
 
+        private List<string> _commandStream = new List<string>();
+
         public MainForm()
         {
             InitializeComponent();
@@ -52,11 +54,16 @@ namespace WhiteboardDrawer
             _estimatedLineLengths = new double[2];
 
             // Create drawer.
-            _drawer = new Common.Drawer(lineFeeds, cradleMountPoints, cradleDimensions, serialNos);
+            _drawer = new Common.Drawer(lineFeeds, cradleMountPoints, cradleDimensions, serialNos, "COM3");
 
             _drawer.OnLineFeedLengthChanged += OnLineFeedLengthChangedArgs;
+            _drawer.OnDrawerArrived += OnDrawerArrived;
 
-            double multiplier = 48.0f; //hackahackahacka...
+            // ~27mm * 3.14159 = 84.55293
+            // 3200 stepper positions per 360 degrees.
+            // 3200 / 84.55293 = 37.84611603642831.
+
+            double multiplier = 37.84611603642831; //hackahackahacka...
 
             _drawer._targetLengthToStepperPosition = (double length) =>
             {
@@ -71,6 +78,10 @@ namespace WhiteboardDrawer
             _drawer.OnDrawerReady += OnDrawerReady;
 
             _drawer.Open();
+
+            TimerHaveArrivedTimer.Enabled = true;
+            TimerHaveArrivedTimer.Start();
+
         }
 
         delegate void DrawSimulationDelegate();
@@ -88,11 +99,51 @@ namespace WhiteboardDrawer
 
         private void OnDrawerReady(object o, Common.Drawer.DrawerReadyArgs e)
         {
-            _drawer.MoveCradle(_cradlePosition);
-
+            Invoke(new DrawSimulationDelegate(_drawer.Reset));
             Invoke(new DrawSimulationDelegate(DrawSimulation));
         }
-        
+
+        private void OnDrawerArrived(object o, Common.Drawer.DrawerArrivedArgs e)
+        {
+            if (_commandStream.Count > 0)
+            {
+                bool hasExecuted = false;
+                var offset = -_boardDimensions / 2.0;
+
+                do
+                {
+                    var line = _commandStream[0];
+                    _commandStream.RemoveAt(0);
+                    var parts = line.Split(' ');
+
+                    if (parts.Length > 0 && parts[0] == "M")
+                    {
+                        var point = (new Vector(System.Convert.ToDouble(parts[1]), System.Convert.ToDouble(parts[2])) + offset);
+    
+                        hasExecuted = true;
+                        _drawer.MoveCradle(point);
+                    }
+                    else if (parts.Length > 0 && parts[0] == "P")
+                    {
+                        var pen = System.Convert.ToInt32(parts[1]);
+
+                        hasExecuted = true;
+                        if (pen == 0)
+                        {
+                            _drawer.DeactivatePens();
+                        }
+                        else
+                        {
+                            _drawer.ActivatePen(pen - 1);
+                        }
+                    }
+                }
+                while(_commandStream.Count > 0 && hasExecuted == false);
+            }
+
+            //Invoke(new DrawSimulationDelegate(_drawer.NextWaypoint));
+        }
+
         /// <summary>
         /// Get scale values for physical/pixel conversion.
         /// </summary>
@@ -249,7 +300,7 @@ namespace WhiteboardDrawer
                 if (ticksElapsed > (10000 * 60))
                 {
                     _lastMoveCommand = DateTime.Now;
-                    _drawer.MoveCradle(_cradlePosition);
+                    _drawer.MoveCradleStraight(_cradlePosition, true);
                 }
             }
             DrawSimulation();
@@ -270,19 +321,45 @@ namespace WhiteboardDrawer
             if (e.Button == System.Windows.Forms.MouseButtons.Left)
             {
                 _cradlePosition = PixelPointToPhysical(new System.Drawing.Point(e.X, e.Y));
-                var ticksElapsed = (DateTime.Now - _lastMoveCommand).Ticks;
-                if (ticksElapsed > (10000 * 60))
-                {
-                    _lastMoveCommand = DateTime.Now;
-                    _drawer.MoveCradle(_cradlePosition);
-                }
+                _drawer.MoveCradleStraight(_cradlePosition, true);
+            }
+            if (e.Button == System.Windows.Forms.MouseButtons.Right)
+            {
+                _cradlePosition = PixelPointToPhysical(new System.Drawing.Point(e.X, e.Y));
+                _drawer.MoveCradleStraight(_cradlePosition, false);
+            }
+            if (e.Button == System.Windows.Forms.MouseButtons.Middle)
+            {
+                _drawer.Reset();
             }
             DrawSimulation();
         }
         
         private void TrackBarMaxVelocity_Scroll(object sender, EventArgs e)
         {
+
             _drawer._velocityMultiplier = (double)TrackBarMaxVelocity.Value / (double)TrackBarMaxVelocity.Maximum;
+        }
+
+        private void ButtonOpenImage_Click(object sender, EventArgs e)
+        {
+            OpenFileDialog openFileDialog = new OpenFileDialog();
+            openFileDialog.Filter = "Files (*.*)|*.*";
+            openFileDialog.Title = "Open Image File.";
+            var result = openFileDialog.ShowDialog();
+            if (result == System.Windows.Forms.DialogResult.OK)
+            {
+                var lines = System.IO.File.ReadAllLines(openFileDialog.FileName);
+                _commandStream.AddRange(lines);
+            }
+        }
+
+        private void TimerHaveArrivedTimer_Tick(object sender, EventArgs e)
+        {
+            if (_drawer.AreWeThereYet())
+            {
+                OnDrawerArrived(this, new Common.Drawer.DrawerArrivedArgs());
+            }            
         }
     }
 }
